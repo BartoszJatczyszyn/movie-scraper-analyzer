@@ -1,0 +1,186 @@
+# instalowanie packages
+```{r}
+install.packages("rvest")
+install.packages("tidyverse")
+install.packages("ggplot2")
+```
+
+# ładowanie bibliotek
+```{r}
+library(rvest)
+library(tidyverse)
+library(ggplot2)
+```
+
+# tworzenie listy 20 stron filmwebu z 500 najlepszymi filmami
+```{r}
+pages_to_scrape <- list(paste0("https://www.filmweb.pl/ajax/ranking/film/",1:20))
+
+# tworzenie tabeli z linkami
+pages_df <- data.frame(url = pages_to_scrape)
+colnames(pages_df)[1] <- "link"
+
+# inicalizacja list
+names <- list()
+years <- list()
+grades <- list()
+genres <- list()
+directors <- list()
+
+# pętla po stronach
+for(i in 1:20){
+  #zczytywanie kolejnych stron
+  document <- read_html(pages_df[i,])
+  #wybieranie elementu ze strony z listą filmów
+  html_movie <- document %>% html_elements("div.rankingType")
+  
+  #pobieranie nazw
+  name_element <- html_movie %>% html_element("div.rankingType__titleWrapper")
+  name <- name_element %>% html_text2()
+  names[[i]] <- name
+  
+  #pobieranie lat
+  year_element <- html_movie %>% html_element("span.rankingType__year")
+  year <- year_element %>% html_text2()
+  years[[i]] <- year
+  
+  #pobieranie ocen
+  grade_element <- html_movie %>% html_element("span.rankingType__rate--value")
+  grade <- grade_element %>% html_text2()
+  grades[[i]] <- grade
+  
+  #pobieranie gatunków
+  genre_element <- html_movie %>% html_element("div.rankingType__genres")
+  genre <- genre_element %>% html_text2()
+  genres[[i]] <- genre
+  
+  #pobieranie reżyserów
+  director_element <- html_movie %>% html_element("[itemprop='director']")
+  director <- director_element %>% html_text2()
+  directors[[i]] <- director
+}
+
+#ustawianie wszystkiego w jednej kolumnie
+names_vector <- unlist(names)
+movie_names <- data.frame(name = names_vector)
+
+years_vector <- unlist(years)
+movie_years <- data.frame(name = years_vector)
+#lata muszą być numeryczne
+movie_years$name <- as.numeric(movie_years$name)
+
+grades_vector <- unlist(grades)
+movie_grades <- data.frame(name = grades_vector)
+#oceny muszą być numeryczne
+movie_grades$name <- as.numeric(gsub(",", ".", movie_grades$name))
+
+genres_vector <- unlist(genres)
+movie_genres <- data.frame(name = genres_vector)
+#usuwanie zbędnych stringów
+movie_genres$name <- gsub("gatunek", "", movie_genres$name)
+movie_genres$name <- sub('.*/', "", movie_genres$name)
+movie_genres$name <- trimws(movie_genres$name, "left")
+
+directors_vector <- unlist(directors)
+movie_directors <- data.frame(name = directors_vector)
+
+#przypisywanie oddzielnych tabel do jednej głównej
+movies <- data.frame(
+  movie_names,
+  movie_years,
+  movie_grades,
+  movie_genres,
+  movie_directors
+)
+names(movies) <- c("name", "year", "grade", "genre", "director")
+
+#zapis w pliku csv
+write.csv(movies, file = "./movies.csv", fileEncoding = "UTF-8")
+```
+
+# Liczenie i wyświetlanie danych
+```{r}
+movies %>%
+  count(year, sort = TRUE)
+movies %>%
+  count(grade, sort = TRUE)
+movies %>%
+  count(genre, sort = TRUE)
+movies %>%
+  count(director, sort = TRUE)
+```
+
+# Wykresy
+```{r}
+ggplot(movie_grades, aes(x = name)) +
+  geom_bar(fill = "steelblue") +
+  labs(title = "Histogram ocen", x = "Ocena", y = "Liczność") +
+  theme(panel.grid = element_line(color = "grey")) +
+  scale_x_continuous(breaks = seq(6.0, 9.0, by = 0.1))
+```
+
+```{r}
+ggplot(movie_genres, aes(x = "", fill = name )) +
+  geom_bar(width = 1) +
+  coord_polar("y") +
+  labs(title = "Histogram gatunków", x = "", y = "") +
+  theme_minimal()
+```
+
+```{r}
+ggplot(movie_genres, aes(x = "", fill = name)) +
+  geom_bar(width = 1, position = "dodge") +
+  labs(title = "Histogram gatunków", x = "Gatunki", y = "Liczba filmów") +
+  theme(panel.grid = element_line(color = "grey"))
+```
+
+```{r}
+ggplot(movie_years, aes(x = name)) +
+  geom_bar(fill = "steelblue") +
+  labs(title = "Histogram lat", x = "Rok produkcji", y = "Liczba filmów") +
+  theme(panel.grid = element_line(color = "grey")) +
+  scale_x_continuous(breaks = seq(1925, 2025, by = 10))
+```
+
+```{r}
+plot(movies$year, movies$grade, xlab = "Rok produkcji", ylab = "Ocena filmu", main = "Wykres korelacji pomiędzy rokiem a oceną")
+abline(v = seq(1925, 2025, by = 5), h = seq(7.2, 9, by = 0.1), col = "grey", lty = 2)
+axis(1, at = seq(1925, 2025, by = 5), labels = seq(1925, 2025, by = 5))
+```
+```{r}
+aggregate(movies$grade ~ movies$director, data = movies, mean)
+```
+
+```{r}
+movies_by_director_mean <- movies %>% group_by(director) %>% summarise(mean_grade = mean(grade))
+movies_by_director_max <- movies %>% group_by(director) %>% summarise(max_grade = max(grade))
+movies_by_director <- movies %>% group_by(director) %>% summarise(count = n())
+
+# wybiera 5 reżyserów z najwyższą średnią oceną
+top_5_mean_directors_movie <- movies_by_director_mean %>% top_n(5, mean_grade)
+
+ggplot(top_5_mean_directors_movie, aes(x = director, y = mean_grade)) +
+  geom_point() +
+  labs(title = "Wykres reżysera od średniej oceny", x = "Reżyser", y = "Średnia ocena") +
+  theme(panel.grid = element_line(color = "grey")) +
+  scale_y_continuous(breaks = seq(8.0, 9.0, by = 0.1)) +
+  geom_text(aes(label = mean_grade), vjust = -0.5, size = 3)
+
+# wybiera 5 reżyserów z najwyższą oceną filmu
+top_5_directors_movie <- movies_by_director_max %>% top_n(5, max_grade)
+
+ggplot(top_5_directors_movie, aes(x = director, y = max_grade)) +
+  geom_point() +
+  labs(title = "Wykres reżysera od maksymalnej oceny", x = "Reżyser", y = "Maksymalna ocena") +
+  theme(panel.grid = element_line(color = "grey")) +
+  scale_y_continuous(breaks = seq(8.0, 9.0, by = 0.1)) +
+  geom_text(aes(label = max_grade), vjust = -0.5, size = 3)
+
+# wybiera 5 reżyserów najczęściej występujących
+top_5_directors <- movies_by_director %>% top_n(5, count)
+
+ggplot(top_5_directors, aes(x = director, y = count)) +
+  geom_col() +
+  labs(title = "Wykres reżysera od liczby filmów", x = "Reżyser", y = "Liczba filmów") +
+  theme(panel.grid = element_line(color = "grey"))
+```
